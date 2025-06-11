@@ -40,47 +40,6 @@ def _is_http_or_https(url: str) -> bool:
     return url.startswith(("http:", "https:"))
 
 
-def _get_fetch_description(has_local_sources: bool) -> str:
-    """Get fetch docs tool description."""
-    description = [
-        "Fetch and parse documentation from a given URL or local file.",
-        "",
-        "Use this tool after list_doc_sources to:",
-        "1. First fetch the llms.txt file from a documentation source",
-        "2. Analyze the URLs listed in the llms.txt file",
-        "3. Then fetch specific documentation pages relevant to the user's question",
-        "",
-    ]
-
-    if has_local_sources:
-        description.extend(
-            [
-                "Args:",
-                "    url: The URL or file path to fetch documentation from. Can be:",
-                "        - URL from an allowed domain",
-                "        - A local file path (absolute or relative)",
-                "        - A file:// URL (e.g., file:///path/to/llms.txt)",
-            ]
-        )
-    else:
-        description.extend(
-            [
-                "Args:",
-                "    url: The URL to fetch documentation from.",
-            ]
-        )
-
-    description.extend(
-        [
-            "",
-            "Returns:",
-            "    The fetched documentation content converted to markdown, or an error message",  # noqa: E501
-            "    if the request fails or the URL is not from an allowed domain.",
-        ]
-    )
-
-    return "\n".join(description)
-
 
 def _normalize_path(path: str) -> str:
     """Accept paths in file:/// or relative format and map to absolute paths."""
@@ -118,9 +77,7 @@ def create_server(
     server = FastMCP(
         name="llms-txt",
         instructions=(
-            "Use the list doc sources tool to see available documentation "
-            "sources. Once you have a source, use fetch docs to get the "
-            "documentation"
+            "Use the tools to fetch docs for a given library or package."
         ),
         **settings,
     )
@@ -157,64 +114,60 @@ def create_server(
         _normalize_path(entry["llms_txt"]) for entry in local_sources
     )
 
-    @server.tool()
-    def list_doc_sources() -> str:
-        """List all available documentation sources.
-
-        This is the first tool you should call in the documentation workflow.
-        It provides URLs to llms.txt files or local file paths that the user has made available.
-
-        Returns:
-            A string containing a formatted list of documentation sources with their URLs or file paths
-        """
-        content = ""
-        for entry_ in doc_sources:
-            url_or_path = entry_["llms_txt"]
-
-            if _is_http_or_https(url_or_path):
-                name = entry_.get("name", extract_domain(url_or_path))
-                content += f"{name}\nURL: {url_or_path}\n\n"
-            else:
-                path = _normalize_path(url_or_path)
-                name = entry_.get("name", path)
-                content += f"{name}\nPath: {path}\n\n"
-        return content
-
-    fetch_docs_description = _get_fetch_description(
-        has_local_sources=bool(local_sources)
-    )
-
-    @server.tool(description=fetch_docs_description)
-    async def fetch_docs(url: str) -> str:
-        nonlocal domains
-        # Handle local file paths (either as file:// URLs or direct filesystem paths)
-        if not _is_http_or_https(url):
-            abs_path = _normalize_path(url)
-            if abs_path not in allowed_local_files:
-                raise ValueError(
-                    f"Local file not allowed: {abs_path}. Allowed files: {allowed_local_files}"
-                )
-            try:
-                with open(abs_path, "r", encoding="utf-8") as f:
-                    content = f.read()
-                return markdownify(content)
-            except Exception as e:
-                return f"Error reading local file: {str(e)}"
+    # Dynamically create a tool for each doc source
+    tool_names = set()
+    for entry_ in doc_sources:
+        url_or_path = entry_["llms_txt"]
+        if _is_http_or_https(url_or_path):
+            name = entry_.get("name", extract_domain(url_or_path))
+            tool_name = f"fetch_docs_{name.replace(' ', '_').replace('.', '_').replace('/', '_')}"
+            description = f"Fetch and return documentation content for: {name}"
+            is_url = True
+            fixed_path = url_or_path
         else:
-            # Otherwise treat as URL
-            if "*" not in domains and not any(
-                url.startswith(domain) for domain in domains
-            ):
-                return (
-                    "Error: URL not allowed. Must start with one of the following domains: "
-                    + ", ".join(domains)
-                )
+            path = _normalize_path(url_or_path)
+            name = entry_.get("name", path)
+            tool_name = f"fetch_docs_{name.replace(' ', '_').replace('.', '_').replace('/', '_')}"
+            description = f"Fetch and return documentation content for {name}"
+            is_url = False
+            fixed_path = path
 
-            try:
-                response = await httpx_client.get(url, timeout=timeout)
-                response.raise_for_status()
-                return markdownify(response.text)
-            except (httpx.HTTPStatusError, httpx.RequestError) as e:
-                return f"Encountered an HTTP error: {str(e)}"
+        if tool_name in tool_names:
+            raise ValueError(f"Duplicate tool name detected: {tool_name}. Please ensure all doc sources have unique names or paths.")
+        tool_names.add(tool_name)
+
+        def make_tool(fixed_path, is_url):
+            if is_url:
+                async def tool_fn():
+                    # Check allowed domains
+                    if "*" not in domains and not any(fixed_path.startswith(domain) for domain in domains):
+                        return (
+                            "Error: URL not allowed. Must start with one of the following domains: "
+                            + ", ".join(domains)
+                        )
+                    try:
+                        response = await httpx_client.get(fixed_path, timeout=timeout)
+                        response.raise_for_status()
+                        return markdownify(response.text)
+                    except (httpx.HTTPStatusError, httpx.RequestError) as e:
+                        return f"Encountered an HTTP error: {str(e)}"
+                return tool_fn
+            else:
+                def tool_fn():
+                    abs_path = fixed_path
+                    if abs_path not in allowed_local_files:
+                        return (
+                            f"Local file not allowed: {abs_path}. Allowed files: {allowed_local_files}"
+                        )
+                    try:
+                        with open(abs_path, "r", encoding="utf-8") as f:
+                            content = f.read()
+                        return markdownify(content)
+                    except Exception as e:
+                        return f"Error reading local file: {str(e)}"
+                return tool_fn
+
+        tool_fn = make_tool(fixed_path, is_url)
+        server.tool(name=tool_name, description=description)(tool_fn)
 
     return server
