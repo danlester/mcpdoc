@@ -114,20 +114,24 @@ def create_server(
         _normalize_path(entry["llms_txt"]) for entry in local_sources
     )
 
+    def make_tool_name(name: str) -> str:
+        """Normalize and create a unique tool name for a doc source."""
+        return f"fetch_docs_{name.replace(' ', '_').replace('.', '_').replace('/', '_')}"
+
     # Dynamically create a tool for each doc source
     tool_names = set()
     for entry_ in doc_sources:
         url_or_path = entry_["llms_txt"]
         if _is_http_or_https(url_or_path):
             name = entry_.get("name", extract_domain(url_or_path))
-            tool_name = f"fetch_docs_{name.replace(' ', '_').replace('.', '_').replace('/', '_')}"
+            tool_name = make_tool_name(name)
             description = f"Fetch and return documentation content for: {name}"
             is_url = True
             fixed_path = url_or_path
         else:
             path = _normalize_path(url_or_path)
             name = entry_.get("name", path)
-            tool_name = f"fetch_docs_{name.replace(' ', '_').replace('.', '_').replace('/', '_')}"
+            tool_name = make_tool_name(name)
             description = f"Fetch and return documentation content for {name}"
             is_url = False
             fixed_path = path
