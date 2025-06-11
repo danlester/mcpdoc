@@ -13,7 +13,7 @@
 **Each documentation source you provide now gets its own dedicated fetch tool!**
 
 - Instead of a generic `list_doc_sources` or `fetch_docs` tool, the MCP server dynamically creates a separate tool for each documentation source (e.g., each `llms.txt` file or local doc path you configure).
-- These tools are named after the source (e.g., `fetch_docs_LangGraph_0`, `fetch_docs_LangChain_1`, etc.) and are visible up front in your MCP client (Cursor, Windsurf, Claude, etc.).
+- These tools are named after the source (e.g., `fetch_docs_LangGraph`, `fetch_docs_LangChain`, etc.) and are visible up front in your MCP client (Cursor, Windsurf, Claude, etc.).
 - **Benefit:** You no longer have to guess or discover which documentation sources are available—every source is directly accessible as its own tool, making it much easier to fetch docs for a particular package or library.
 - This also makes it easier to audit and control which documentation is being accessed by your LLM agent.
 
@@ -26,8 +26,8 @@ If you configure two sources:
 
 you will see two tools:
 
-- `fetch_docs_LangGraph_0`
-- `fetch_docs_LangChain_1`
+- `fetch_docs_LangGraph`
+- `fetch_docs_LangChain`
 
 Each tool fetches and returns the documentation content for its specific source, converting it to markdown and handling errors.
 
@@ -130,10 +130,10 @@ npx @modelcontextprotocol/inspector
 
 ```
 for ANY question about LangGraph, use the langgraph-docs-mcp server to help answer --
-- call the fetch_docs_LangGraph_0 tool to get the available llms.txt file
+- call the fetch_docs_LangGraph tool to get the available llms.txt file
 - reflect on the urls in llms.txt
 - reflect on the input question
-- call fetch_docs_LangGraph_0 or fetch_docs_LangChain_1 on any urls relevant to the question
+- call fetch_docs_LangGraph or fetch_docs_LangChain on any urls relevant to the question
 - use this to answer the question
 ```
 
@@ -162,10 +162,10 @@ what are types of memory in LangGraph?
 
 ```
 for ANY question about LangGraph, use the langgraph-docs-mcp server to help answer --
-- call the fetch_docs_LangGraph_0 tool to get the available llms.txt file
+- call the fetch_docs_LangGraph tool to get the available llms.txt file
 - reflect on the urls in llms.txt
 - reflect on the input question
-- call fetch_docs_LangGraph_0 or fetch_docs_LangChain_1 on any urls relevant to the question
+- call fetch_docs_LangGraph or fetch_docs_LangChain on any urls relevant to the question
 ```
 
 ![Screenshot 2025-03-18 at 2 02 12 PM](https://github.com/user-attachments/assets/5a29bd6a-ad9a-4c4a-a4d5-262c914c5276)
@@ -217,10 +217,10 @@ Then, try the example prompt:
 ```
 <rules>
 for ANY question about LangGraph, use the langgraph-docs-mcp server to help answer --
-- call the fetch_docs_LangGraph_0 tool to get the available llms.txt file
+- call the fetch_docs_LangGraph tool to get the available llms.txt file
 - reflect on the urls in llms.txt
 - reflect on the input question
-- call fetch_docs_LangGraph_0 or fetch_docs_LangChain_1 on any urls relevant to the question
+- call fetch_docs_LangGraph or fetch_docs_LangChain on any urls relevant to the question
 </rules>
 ```
 
@@ -260,10 +260,10 @@ $ /mcp
 ```
 <rules>
 for ANY question about LangGraph, use the langgraph-docs-mcp server to help answer --
-- call the fetch_docs_LangGraph_0 tool to get the available llms.txt file
+- call the fetch_docs_LangGraph tool to get the available llms.txt file
 - reflect on the urls in llms.txt
 - reflect on the input question
-- call fetch_docs_LangGraph_0 or fetch_docs_LangChain_1 on any urls relevant to the question
+- call fetch_docs_LangGraph or fetch_docs_LangChain on any urls relevant to the question
 </rules>
 ```
 
@@ -275,103 +275,4 @@ Then, try the example prompt:
 
 ## Command-line Interface
 
-The `mcpdoc` command provides a simple CLI for launching the documentation server.
-
-You can specify documentation sources in three ways, and these can be combined:
-
-1. Using a YAML config file:
-
-- This will load the LangGraph Python documentation from the `sample_config.yaml` file in this repo.
-
-```bash
-mcpdoc --yaml sample_config.yaml
-```
-
-2. Using a JSON config file:
-
-- This will load the LangGraph Python documentation from the `sample_config.json` file in this repo.
-
-```bash
-mcpdoc --json sample_config.json
-```
-
-3. Directly specifying llms.txt URLs with optional names:
-
-- URLs can be specified either as plain URLs or with optional names using the format `name:url`.
-- You can specify multiple URLs by using the `--urls` parameter multiple times.
-- This is how we loaded `llms.txt` for the MCP server above.
-
-```bash
-mcpdoc --urls LangGraph:https://langchain-ai.github.io/langgraph/llms.txt --urls LangChain:https://python.langchain.com/llms.txt
-```
-
-You can also combine these methods to merge documentation sources:
-
-```bash
-mcpdoc --yaml sample_config.yaml --json sample_config.json --urls LangGraph:https://langchain-ai.github.io/langgraph/llms.txt --urls LangChain:https://python.langchain.com/llms.txt
-```
-
-## Additional Options
-
-- `--follow-redirects`: Follow HTTP redirects (defaults to False)
-- `--timeout SECONDS`: HTTP request timeout in seconds (defaults to 10.0)
-
-Example with additional options:
-
-```bash
-mcpdoc --yaml sample_config.yaml --follow-redirects --timeout 15
-```
-
-This will load the LangGraph Python documentation with a 15-second timeout and follow any HTTP redirects if necessary.
-
-## Configuration Format
-
-Both YAML and JSON configuration files should contain a list of documentation sources.
-
-Each source must include an `llms_txt` URL and can optionally include a `name`:
-
-### YAML Configuration Example (sample_config.yaml)
-
-```yaml
-# Sample configuration for mcp-mcpdoc server
-# Each entry must have a llms_txt URL and optionally a name
-- name: LangGraph Python
-  llms_txt: https://langchain-ai.github.io/langgraph/llms.txt
-```
-
-### JSON Configuration Example (sample_config.json)
-
-```json
-[
-  {
-    "name": "LangGraph Python",
-    "llms_txt": "https://langchain-ai.github.io/langgraph/llms.txt"
-  }
-]
-```
-
-## Programmatic Usage
-
-```python
-from mcpdoc.main import create_server
-
-# Create a server with documentation sources
-server = create_server(
-    [
-        {
-            "name": "LangGraph Python",
-            "llms_txt": "https://langchain-ai.github.io/langgraph/llms.txt",
-        },
-        # You can add multiple documentation sources
-        # {
-        #     "name": "Another Documentation",
-        #     "llms_txt": "https://example.com/llms.txt",
-        # },
-    ],
-    follow_redirects=True,
-    timeout=15.0,
-)
-
-# Run the server
-server.run(transport="stdio")
-```
+The `mcpdoc`

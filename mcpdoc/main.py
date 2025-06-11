@@ -57,6 +57,7 @@ def create_server(
     timeout: float = 10,
     settings: dict | None = None,
     allowed_domains: list[str] | None = None,
+    max_tool_name_length: int = 60,
 ) -> FastMCP:
     """Create the server and generate documentation retrieval tools.
 
@@ -69,6 +70,7 @@ def create_server(
             Use ['*'] to allow all domains
             The domain hosting the llms.txt file is always appended to the list
             of allowed domains.
+        max_tool_name_length: Maximum length for tool names (default 60). Use 0 for no limit.
 
     Returns:
         A FastMCP server instance configured with documentation tools
@@ -115,8 +117,11 @@ def create_server(
     )
 
     def make_tool_name(name: str) -> str:
-        """Normalize and create a unique tool name for a doc source."""
-        return f"fetch_docs_{name.replace(' ', '_').replace('.', '_').replace('/', '_')}"
+        """Normalize and create a unique tool name for a doc source, with length restriction."""
+        base = f"fetch_docs_{name.replace(' ', '_').replace('.', '_').replace('/', '_')}"
+        if max_tool_name_length and max_tool_name_length > 0:
+            return base[:max_tool_name_length]
+        return base
 
     # Dynamically create a tool for each doc source
     tool_names = set()

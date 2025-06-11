@@ -134,6 +134,13 @@ def parse_args() -> argparse.Namespace:
         help="Show version information and exit",
     )
 
+    parser.add_argument(
+        "--max-tool-name-length",
+        type=int,
+        default=60,
+        help="Maximum length for tool names (default: 60). Set to 0 for unlimited length. Useful for MCP clients that have tool name length restrictions.",
+    )
+
     return parser.parse_args()
 
 
@@ -246,6 +253,7 @@ def main() -> None:
         timeout=args.timeout,
         settings=settings,
         allowed_domains=args.allowed_domains,
+        max_tool_name_length=args.max_tool_name_length,
     )
 
     if args.transport == "sse":
