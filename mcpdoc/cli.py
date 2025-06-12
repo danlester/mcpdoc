@@ -2,15 +2,13 @@
 """Command-line interface for mcp-llms-txt server."""
 
 import argparse
-import json
 import sys
 from typing import List, Dict
-
-import yaml
 
 from mcpdoc._version import __version__
 from mcpdoc.main import create_server, DocSource
 from mcpdoc.splash import SPLASH
+from mcpdoc.utils import load_config_file
 
 
 class CustomFormatter(
@@ -27,30 +25,24 @@ Examples:
   
   # Using a local file (absolute or relative path)
   mcpdoc --urls LocalDocs:/path/to/llms.txt --allowed-domains '*'
-  
-  # Using a YAML config file
-  mcpdoc --yaml sample_config.yaml
 
   # Using a JSON config file
   mcpdoc --json sample_config.json
 
-  # Combining multiple documentation sources
-  mcpdoc --yaml sample_config.yaml --json sample_config.json --urls LangGraph:https://langchain-ai.github.io/langgraph/llms.txt
-
   # Using SSE transport with default host (127.0.0.1) and port (8000)
-  mcpdoc --yaml sample_config.yaml --transport sse
+  mcpdoc --json sample_config.json --transport sse
   
   # Using SSE transport with custom host and port
-  mcpdoc --yaml sample_config.yaml --transport sse --host 0.0.0.0 --port 9000
+  mcpdoc --json sample_config.json --transport sse --host 0.0.0.0 --port 9000
   
   # Using SSE transport with additional HTTP options
-  mcpdoc --yaml sample_config.yaml --follow-redirects --timeout 15 --transport sse --host localhost --port 8080
+  mcpdoc --json sample_config.json --follow-redirects --timeout 15 --transport sse --host localhost --port 8080
   
   # Allow fetching from additional domains. The domains hosting the llms.txt files are always allowed.
-  mcpdoc --yaml sample_config.yaml --allowed-domains https://example.com/ https://another-example.com/
+  mcpdoc --json sample_config.json --allowed-domains https://example.com/ https://another-example.com/
   
   # Allow fetching from any domain
-  mcpdoc --yaml sample_config.yaml --allowed-domains '*'
+  mcpdoc --json sample_config.json --allowed-domains '*'
 """
 
 
@@ -64,9 +56,6 @@ def parse_args() -> argparse.Namespace:
     )
 
     # Allow combining multiple doc source methods
-    parser.add_argument(
-        "--yaml", "-y", type=str, help="Path to YAML config file with doc sources"
-    )
     parser.add_argument(
         "--json", "-j", type=str, help="Path to JSON config file with doc sources"
     )
@@ -144,34 +133,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_config_file(file_path: str, file_format: str) -> List[Dict[str, str]]:
-    """Load configuration from a file.
-
-    Args:
-        file_path: Path to the config file
-        file_format: Format of the config file ("yaml" or "json")
-
-    Returns:
-        List of doc source configurations
-    """
-    try:
-        with open(file_path, "r", encoding="utf-8") as file:
-            if file_format.lower() == "yaml":
-                config = yaml.safe_load(file)
-            elif file_format.lower() == "json":
-                config = json.load(file)
-            else:
-                raise ValueError(f"Unsupported file format: {file_format}")
-
-        if not isinstance(config, list):
-            raise ValueError("Config file must contain a list of doc sources")
-
-        return config
-    except (FileNotFoundError, yaml.YAMLError, json.JSONDecodeError) as e:
-        print(f"Error loading config file: {e}", file=sys.stderr)
-        sys.exit(1)
-
-
 def create_doc_sources_from_urls(urls: List[str]) -> List[DocSource]:
     """Create doc sources from a list of URLs or file paths with optional names.
 
@@ -224,20 +185,20 @@ def main() -> None:
     doc_sources: List[DocSource] = []
 
     # Check if any source options were provided
-    if not (args.yaml or args.json or args.urls):
+    if not (args.json or args.urls):
         print(
-            "Error: At least one source option (--yaml, --json, or --urls) is required",
+            "Error: At least one source option (--json or --urls) is required",
             file=sys.stderr,
         )
         sys.exit(1)
 
     # Merge doc sources from all provided methods
-    if args.yaml:
-        doc_sources.extend(load_config_file(args.yaml, "yaml"))
     if args.json:
-        doc_sources.extend(load_config_file(args.json, "json"))
+        doc_sources.extend(load_config_file(args.json))
     if args.urls:
-        doc_sources.extend(create_doc_sources_from_urls(args.urls))
+        for doc_source in create_doc_sources_from_urls(args.urls):
+            if doc_source not in doc_sources:
+                doc_sources.append(doc_source)
 
     # Only used with SSE transport
     settings = {
@@ -254,6 +215,7 @@ def main() -> None:
         settings=settings,
         allowed_domains=args.allowed_domains,
         max_tool_name_length=args.max_tool_name_length,
+        json_config_path=args.json if args.json else None,
     )
 
     if args.transport == "sse":

@@ -5,8 +5,10 @@ from urllib.parse import urlparse
 
 import httpx
 from markdownify import markdownify
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 from typing_extensions import NotRequired, TypedDict
+
+from mcpdoc.utils import save_config_file
 
 
 class DocSource(TypedDict):
@@ -58,6 +60,7 @@ def create_server(
     settings: dict | None = None,
     allowed_domains: list[str] | None = None,
     max_tool_name_length: int = 60,
+    json_config_path: str | None = None,
 ) -> FastMCP:
     """Create the server and generate documentation retrieval tools.
 
@@ -71,11 +74,13 @@ def create_server(
             The domain hosting the llms.txt file is always appended to the list
             of allowed domains.
         max_tool_name_length: Maximum length for tool names (default 60). Use 0 for no limit.
+        json_config_path: Path to the JSON config file used to load doc sources (optional).
 
     Returns:
         A FastMCP server instance configured with documentation tools
     """
-    settings = settings or {}
+    print("Creating server with settings:", settings)
+    settings = settings or {"tools_changed": json_config_path is not None}
     server = FastMCP(
         name="llms-txt",
         instructions=(
@@ -85,74 +90,55 @@ def create_server(
     )
     httpx_client = httpx.AsyncClient(follow_redirects=follow_redirects, timeout=timeout)
 
-    local_sources = []
-    remote_sources = []
-
-    for entry in doc_sources:
-        url = entry["llms_txt"]
-        if _is_http_or_https(url):
-            remote_sources.append(entry)
-        else:
-            local_sources.append(entry)
-
-    # Let's verify that all local sources exist
-    for entry in local_sources:
-        path = entry["llms_txt"]
-        abs_path = _normalize_path(path)
-        if not os.path.exists(abs_path):
-            raise FileNotFoundError(f"Local file not found: {abs_path}")
-
-    # Parse the domain names in the llms.txt URLs and identify local file paths
-    domains = set(extract_domain(entry["llms_txt"]) for entry in remote_sources)
-
-    # Add additional allowed domains if specified, or set to '*' if we have local files
-    if allowed_domains:
-        if "*" in allowed_domains:
-            domains = {"*"}  # Special marker for allowing all domains
-        else:
-            domains.update(allowed_domains)
-
-    allowed_local_files = set(
-        _normalize_path(entry["llms_txt"]) for entry in local_sources
-    )
-
-    def make_tool_name(name: str) -> str:
-        """Normalize and create a unique tool name for a doc source, with length restriction."""
-        base = f"fetch_docs_{name.replace(' ', '_').replace('.', '_').replace('/', '_')}"
-        if max_tool_name_length and max_tool_name_length > 0:
-            return base[:max_tool_name_length]
-        return base
-
-    # Dynamically create a tool for each doc source
     tool_names = set()
-    for entry_ in doc_sources:
-        url_or_path = entry_["llms_txt"]
+    doc_sources_registry: list[DocSource] = []
+
+    def make_tool_from_doc_source(doc_source: DocSource):
+        url = doc_source["llms_txt"]
+        is_remote_source = _is_http_or_https(url)
+
+        # Let's verify that all local sources exist
+        if not is_remote_source:
+            path = doc_source["llms_txt"]
+            abs_path = _normalize_path(path)
+            if not os.path.exists(abs_path):
+                raise FileNotFoundError(f"Local file not found: {abs_path}")
+
+        def make_tool_name(name: str) -> str:
+            """Normalize and create a unique tool name for a doc source, with length restriction."""
+            base = f"fetch_docs_{name.replace(' ', '_').replace('.', '_').replace('/', '_')}"
+            if max_tool_name_length and max_tool_name_length > 0:
+                return base[:max_tool_name_length]
+            return base
+
+
+        url_or_path = doc_source["llms_txt"]
         if _is_http_or_https(url_or_path):
-            name = entry_.get("name", extract_domain(url_or_path))
+            name = doc_source.get("name", extract_domain(url_or_path))
             tool_name = make_tool_name(name)
             description = f"Fetch and return documentation content for: {name}"
             is_url = True
             fixed_path = url_or_path
         else:
             path = _normalize_path(url_or_path)
-            name = entry_.get("name", path)
+            name = doc_source.get("name", path)
             tool_name = make_tool_name(name)
             description = f"Fetch and return documentation content for {name}"
             is_url = False
             fixed_path = path
 
         if tool_name in tool_names:
-            raise ValueError(f"Duplicate tool name detected: {tool_name}. Please ensure all doc sources have unique names or paths.")
+            raise ValueError(f"Duplicate tool name detected: {tool_name}. Please ensure all doc sources have unique names.")
         tool_names.add(tool_name)
 
         def make_tool(fixed_path, is_url):
             if is_url:
                 async def tool_fn():
                     # Check allowed domains
-                    if "*" not in domains and not any(fixed_path.startswith(domain) for domain in domains):
+                    if "*" not in allowed_domains and not any(fixed_path.startswith(domain) for domain in allowed_domains):
                         return (
                             "Error: URL not allowed. Must start with one of the following domains: "
-                            + ", ".join(domains)
+                            + ", ".join(allowed_domains)
                         )
                     try:
                         response = await httpx_client.get(fixed_path, timeout=timeout)
@@ -164,10 +150,10 @@ def create_server(
             else:
                 def tool_fn():
                     abs_path = fixed_path
-                    if abs_path not in allowed_local_files:
-                        return (
-                            f"Local file not allowed: {abs_path}. Allowed files: {allowed_local_files}"
-                        )
+                    # if abs_path not in allowed_local_files:
+                    #     return (
+                    #         f"Local file not allowed: {abs_path}. Allowed files: {allowed_local_files}"
+                    #     )
                     try:
                         with open(abs_path, "r", encoding="utf-8") as f:
                             content = f.read()
@@ -178,5 +164,35 @@ def create_server(
 
         tool_fn = make_tool(fixed_path, is_url)
         server.tool(name=tool_name, description=description)(tool_fn)
+        doc_sources_registry.append(doc_source)
+
+    for entry in doc_sources:
+        make_tool_from_doc_source(entry)
+
+    if json_config_path:
+        # add a tool where you can add a new doc source by specifying a name and a url
+        def add_doc_source(name: str, url: str, description: str | None = None) -> None:
+            doc_source = {"name": name, "llms_txt": url}
+            if description is not None:
+                doc_source["description"] = description
+            make_tool_from_doc_source(doc_source)
+            save_config_file(json_config_path, doc_sources_registry)
+            # Should automatically emit a notification that the tools list has changed
+
+        server.tool(name="add_doc_source", description="Add a new doc source")(add_doc_source)
+
+        # add a tool where you can remove a doc source by specifying a name
+        def remove_doc_source(name: str) -> None:
+            nonlocal doc_sources_registry
+            doc_sources_registry = [entry for entry in doc_sources_registry if entry["name"] != name]
+            server.remove_tool(f"fetch_docs_{name}")
+            save_config_file(json_config_path, doc_sources_registry)
+
+        server.tool(name="remove_doc_source", description="Remove a doc source")(remove_doc_source)
+
+        # add a tool to list all doc sources
+        def list_doc_sources() -> list[DocSource]:
+            return doc_sources_registry
+        server.tool(name="list_doc_sources", description="List all doc sources")(list_doc_sources)
 
     return server
