@@ -179,16 +179,20 @@ def create_server(
             save_config_file(json_config_path, doc_sources_registry)
             # Should automatically emit a notification that the tools list has changed
 
-        server.tool(name="add_doc_source", description="Add a new doc source")(add_doc_source)
+        server.tool(name="add_doc_source", description="Add a new doc source by name and url")(add_doc_source)
 
         # add a tool where you can remove a doc source by specifying a name
         def remove_doc_source(name: str) -> None:
+            # if name starts with fetch_docs_, remove it
+            if name.startswith("fetch_docs_"):
+                name = name[len("fetch_docs_"):]
             nonlocal doc_sources_registry
             doc_sources_registry = [entry for entry in doc_sources_registry if entry["name"] != name]
             server.remove_tool(f"fetch_docs_{name}")
             save_config_file(json_config_path, doc_sources_registry)
 
-        server.tool(name="remove_doc_source", description="Remove a doc source")(remove_doc_source)
+        server.tool(name="remove_doc_source", description="""Remove a doc source by name. 
+                    You can find a list of doc sources in the list_doc_sources tool, or based on the names of the tools beginning 'fetch_docs_'""")(remove_doc_source)
 
         # add a tool to list all doc sources
         def list_doc_sources() -> list[DocSource]:
