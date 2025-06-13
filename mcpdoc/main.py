@@ -5,10 +5,11 @@ from urllib.parse import urlparse
 
 import httpx
 from markdownify import markdownify
-from fastmcp import FastMCP
-from typing_extensions import NotRequired, TypedDict
-
+from fastmcp import FastMCP, Context
+from typing import NotRequired, TypedDict, Annotated
+from pydantic import Field
 from mcpdoc.utils import save_config_file
+from mcp.shared.exceptions import McpError
 
 
 class DocSource(TypedDict):
@@ -148,12 +149,25 @@ def create_server(
                         return f"Encountered an HTTP error: {str(e)}"
                 return tool_fn
             else:
-                def tool_fn():
-                    abs_path = fixed_path
-                    # if abs_path not in allowed_local_files:
-                    #     return (
-                    #         f"Local file not allowed: {abs_path}. Allowed files: {allowed_local_files}"
-                    #     )
+                async def tool_fn(ctx: Context):
+                    abs_path = os.path.abspath(fixed_path)
+                    try:
+                        roots = await ctx.list_roots()
+                    except McpError as e:
+                        return (
+                            "Error: Unable to check allowed roots for local file access. "
+                            "Your MCP client may not support the 'roots' method required for local file security. "
+                            f"Details: {e}"
+                        )
+                    # Check if abs_path is within any root
+                    allowed = False
+                    for root in roots:
+                        root_path = _normalize_path(root.uri)
+                        if os.path.commonpath([abs_path, root_path]) == root_path:
+                            allowed = True
+                            break
+                    if not allowed:
+                        return f"Error: Local file {abs_path} is not within any allowed root directory. Allowed roots: {roots}"
                     try:
                         with open(abs_path, "r", encoding="utf-8") as f:
                             content = f.read()
@@ -169,7 +183,10 @@ def create_server(
     for entry in doc_sources:
         make_tool_from_doc_source(entry)
 
-    def add_doc_source(name: str, url: str, description: str | None = None) -> str:
+    
+    async def add_doc_source(name: str, 
+                             url: Annotated[str | None, Field(description="URL of LLMS.txt file or documentation source. Use 'file://' for local files.")],
+                             description: str | None = None) -> str:
         doc_source = {"name": name, "llms_txt": url}
         if description:
             doc_source["description"] = description
@@ -180,7 +197,7 @@ def create_server(
 
     server.tool(name="add_doc_source", description="Add a new doc source by name and url")(add_doc_source)
 
-    def remove_doc_source(name: str) -> str:
+    async def remove_doc_source(name: str) -> str:
         # if name starts with fetch_docs_, remove it
         if name.startswith("fetch_docs_"):
             name = name[len("fetch_docs_"):]
@@ -193,7 +210,7 @@ def create_server(
     server.tool(name="remove_doc_source", description="""Remove a doc source by name. \
                 You can find a list of doc sources in the list_doc_sources tool, or based on the names of the tools beginning 'fetch_docs_'""")(remove_doc_source)
 
-    def list_doc_sources() -> list[DocSource]:
+    async def list_doc_sources() -> list[DocSource]:
         return doc_sources_registry
     server.tool(name="list_doc_sources", description="List all doc sources")(list_doc_sources)
 
