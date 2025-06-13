@@ -60,7 +60,7 @@ def create_server(
     settings: dict | None = None,
     allowed_domains: list[str] | None = None,
     max_tool_name_length: int = 60,
-    json_config_path: str | None = None,
+    json_config_path: str,
 ) -> FastMCP:
     """Create the server and generate documentation retrieval tools.
 
@@ -74,13 +74,13 @@ def create_server(
             The domain hosting the llms.txt file is always appended to the list
             of allowed domains.
         max_tool_name_length: Maximum length for tool names (default 60). Use 0 for no limit.
-        json_config_path: Path to the JSON config file used to load doc sources (optional).
+        json_config_path: Path to the JSON config file used to load doc sources.
 
     Returns:
         A FastMCP server instance configured with documentation tools
     """
     print("Creating server with settings:", settings)
-    settings = settings or {"tools_changed": json_config_path is not None}
+    settings = settings or {"tools_changed": True}
     server = FastMCP(
         name="llms-txt",
         instructions=(
@@ -169,34 +169,32 @@ def create_server(
     for entry in doc_sources:
         make_tool_from_doc_source(entry)
 
-    if json_config_path:
-        # add a tool where you can add a new doc source by specifying a name and a url
-        def add_doc_source(name: str, url: str, description: str | None = None) -> None:
-            doc_source = {"name": name, "llms_txt": url}
-            if description is not None:
-                doc_source["description"] = description
-            make_tool_from_doc_source(doc_source)
-            save_config_file(json_config_path, doc_sources_registry)
-            # Should automatically emit a notification that the tools list has changed
+    def add_doc_source(name: str, url: str, description: str | None = None) -> str:
+        doc_source = {"name": name, "llms_txt": url}
+        if description:
+            doc_source["description"] = description
+        make_tool_from_doc_source(doc_source)
+        save_config_file(json_config_path, doc_sources_registry)
+        # Should automatically emit a notification that the tools list has changed
+        return f"Added doc source: {name}"
 
-        server.tool(name="add_doc_source", description="Add a new doc source by name and url")(add_doc_source)
+    server.tool(name="add_doc_source", description="Add a new doc source by name and url")(add_doc_source)
 
-        # add a tool where you can remove a doc source by specifying a name
-        def remove_doc_source(name: str) -> None:
-            # if name starts with fetch_docs_, remove it
-            if name.startswith("fetch_docs_"):
-                name = name[len("fetch_docs_"):]
-            nonlocal doc_sources_registry
-            doc_sources_registry = [entry for entry in doc_sources_registry if entry["name"] != name]
-            server.remove_tool(f"fetch_docs_{name}")
-            save_config_file(json_config_path, doc_sources_registry)
+    def remove_doc_source(name: str) -> str:
+        # if name starts with fetch_docs_, remove it
+        if name.startswith("fetch_docs_"):
+            name = name[len("fetch_docs_"):]
+        nonlocal doc_sources_registry
+        doc_sources_registry = [entry for entry in doc_sources_registry if entry["name"] != name]
+        server.remove_tool(f"fetch_docs_{name}")
+        save_config_file(json_config_path, doc_sources_registry)
+        return f"Removed doc source: {name}"
+    
+    server.tool(name="remove_doc_source", description="""Remove a doc source by name. \
+                You can find a list of doc sources in the list_doc_sources tool, or based on the names of the tools beginning 'fetch_docs_'""")(remove_doc_source)
 
-        server.tool(name="remove_doc_source", description="""Remove a doc source by name. 
-                    You can find a list of doc sources in the list_doc_sources tool, or based on the names of the tools beginning 'fetch_docs_'""")(remove_doc_source)
-
-        # add a tool to list all doc sources
-        def list_doc_sources() -> list[DocSource]:
-            return doc_sources_registry
-        server.tool(name="list_doc_sources", description="List all doc sources")(list_doc_sources)
+    def list_doc_sources() -> list[DocSource]:
+        return doc_sources_registry
+    server.tool(name="list_doc_sources", description="List all doc sources")(list_doc_sources)
 
     return server

@@ -72,11 +72,25 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 >
 > This security measure prevents unauthorized access to domains not explicitly approved by the user, ensuring that documentation can only be retrieved from trusted sources.
 
-#### (Optional) Test the MCP server locally with your `llms.txt` file(s) of choice:
+#### (Optional) Test the MCP server locally with your `llms.txt` sources using a JSON config file:
+
+Create a config file (e.g., `sample_config.json`):
+
+```json
+[
+  {
+    "name": "LangGraph",
+    "llms_txt": "https://langchain-ai.github.io/langgraph/llms.txt"
+  },
+  { "name": "LangChain", "llms_txt": "https://python.langchain.com/llms.txt" }
+]
+```
+
+Then run:
 
 ```bash
 uvx --from mcpdoc mcpdoc \
-    --urls "LangGraph:https://langchain-ai.github.io/langgraph/llms.txt" "LangChain:https://python.langchain.com/llms.txt" \
+    --json sample_config.json \
     --transport sse \
     --port 8082 \
     --host localhost
@@ -114,8 +128,8 @@ npx @modelcontextprotocol/inspector
         "--from",
         "mcpdoc",
         "mcpdoc",
-        "--urls",
-        "LangGraph:https://langchain-ai.github.io/langgraph/llms.txt LangChain:https://python.langchain.com/llms.txt",
+        "--json",
+        "sample_config.json",
         "--transport",
         "stdio"
       ]
@@ -134,7 +148,6 @@ for ANY question about LangGraph, use the langgraph-docs-mcp server to help answ
 - reflect on the urls in llms.txt
 - reflect on the input question
 - call fetch_docs_LangGraph or fetch_docs_LangChain on any urls relevant to the question
-- use this to answer the question
 ```
 
 - `CMD+L` (on Mac) to open chat.
@@ -199,10 +212,8 @@ Then, try the example prompt:
 >         "--from",
 >         "mcpdoc",
 >         "mcpdoc",
->         "--urls",
->         "LangGraph:https://langchain-ai.github.io/langgraph/llms.txt",
->         "--transport",
->         "stdio"
+>         "--json",
+>         "sample_config.json"
 >       ]
 >     }
 >   }
@@ -241,7 +252,7 @@ Then, try the example prompt:
 - In a terminal after installing [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview), run this command to add the MCP server to your project:
 
 ```
-claude mcp add-json langgraph-docs '{"type":"stdio","command":"uvx" ,"args":["--from", "mcpdoc", "mcpdoc", "--urls", "langgraph:https://langchain-ai.github.io/langgraph/llms.txt", "--urls", "LangChain:https://python.langchain.com/llms.txt"]}' -s local
+claude mcp add-json langgraph-docs '{"type":"stdio","command":"uvx" ,"args":["--from", "mcpdoc", "mcpdoc", "--json", "sample_config.json"]}' -s local
 ```
 
 - You will see `~/.claude.json` updated.

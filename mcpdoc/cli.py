@@ -3,12 +3,13 @@
 
 import argparse
 import sys
+import os
 from typing import List, Dict
 
 from mcpdoc._version import __version__
 from mcpdoc.main import create_server, DocSource
 from mcpdoc.splash import SPLASH
-from mcpdoc.utils import load_config_file
+from mcpdoc.utils import load_config_file, save_config_file
 
 
 class CustomFormatter(
@@ -20,12 +21,6 @@ class CustomFormatter(
 
 EPILOG = """
 Examples:
-  # Directly specifying llms.txt URLs with optional names
-  mcpdoc --urls LangGraph:https://langchain-ai.github.io/langgraph/llms.txt
-  
-  # Using a local file (absolute or relative path)
-  mcpdoc --urls LocalDocs:/path/to/llms.txt --allowed-domains '*'
-
   # Using a JSON config file
   mcpdoc --json sample_config.json
 
@@ -55,16 +50,9 @@ def parse_args() -> argparse.Namespace:
         epilog=EPILOG,
     )
 
-    # Allow combining multiple doc source methods
+    default_json_path = os.path.expanduser("~/.mcpdoc/default.json")
     parser.add_argument(
-        "--json", "-j", type=str, help="Path to JSON config file with doc sources"
-    )
-    parser.add_argument(
-        "--urls",
-        "-u",
-        type=str,
-        nargs="+",
-        help="List of llms.txt URLs or file paths with optional names (format: 'url_or_path' or 'name:url_or_path')",
+        "--json", "-j", type=str, default=default_json_path, help="Path to JSON config file with doc sources"
     )
 
     parser.add_argument(
@@ -133,72 +121,25 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def create_doc_sources_from_urls(urls: List[str]) -> List[DocSource]:
-    """Create doc sources from a list of URLs or file paths with optional names.
-
-    Args:
-        urls: List of llms.txt URLs or file paths with optional names
-             (format: 'url_or_path' or 'name:url_or_path')
-
-    Returns:
-        List of DocSource objects
-    """
-    doc_sources = []
-    for entry in urls:
-        if not entry.strip():
-            continue
-        if ":" in entry and not entry.startswith(("http:", "https:")):
-            # Format is name:url
-            name, url = entry.split(":", 1)
-            doc_sources.append({"name": name, "llms_txt": url})
-        else:
-            # Format is just url
-            doc_sources.append({"llms_txt": entry})
-    return doc_sources
-
-
 def main() -> None:
     """Main entry point for the CLI."""
-    # Check if any arguments were provided
-    if len(sys.argv) == 1:
-        # No arguments, print help
-        # Use the same custom formatter as parse_args()
-        help_parser = argparse.ArgumentParser(
-            description="MCP LLMS-TXT Documentation Server",
-            formatter_class=CustomFormatter,
-            epilog=EPILOG,
-        )
-        # Add version to help parser too
-        help_parser.add_argument(
-            "--version",
-            "-V",
-            action="version",
-            version=f"mcpdoc {__version__}",
-            help="Show version information and exit",
-        )
-        help_parser.print_help()
-        sys.exit(0)
 
     args = parse_args()
 
-    # Load doc sources based on command-line arguments
+    # Ensure the JSON config file exists, or try to create it (and its parent directory)
+    json_path = os.path.expanduser(args.json)
+    json_dir = os.path.dirname(json_path)
+    if not os.path.exists(json_path):
+        try:
+            os.makedirs(json_dir, exist_ok=True)
+            save_config_file(json_path, [])
+        except Exception as e:
+            print(f"Error: Unable to create or write to config file at {json_path}: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    # Only load doc sources from args.json
     doc_sources: List[DocSource] = []
-
-    # Check if any source options were provided
-    if not (args.json or args.urls):
-        print(
-            "Error: At least one source option (--json or --urls) is required",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    # Merge doc sources from all provided methods
-    if args.json:
-        doc_sources.extend(load_config_file(args.json))
-    if args.urls:
-        for doc_source in create_doc_sources_from_urls(args.urls):
-            if doc_source not in doc_sources:
-                doc_sources.append(doc_source)
+    doc_sources.extend(load_config_file(json_path))
 
     # Only used with SSE transport
     settings = {
@@ -215,7 +156,7 @@ def main() -> None:
         settings=settings,
         allowed_domains=args.allowed_domains,
         max_tool_name_length=args.max_tool_name_length,
-        json_config_path=args.json if args.json else None,
+        json_config_path=json_path,
     )
 
     if args.transport == "sse":
