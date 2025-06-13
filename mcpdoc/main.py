@@ -129,8 +129,9 @@ def create_server(
             fixed_path = path
 
         if tool_name in tool_names:
-            raise ValueError(f"Duplicate tool name detected: {tool_name}. Please ensure all doc sources have unique names.")
-        tool_names.add(tool_name)
+            print(f"Duplicate tool name detected: {tool_name}. Please ensure all doc sources have unique names.")
+        else:
+            tool_names.add(tool_name)
 
         def make_tool(fixed_path, is_url):
             if is_url:
